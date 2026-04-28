@@ -1,0 +1,76 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helper Functions ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // --- Collection Rules ---
+
+    /**
+     * @description User accounts. Read/write by owner. 
+     * list allowed for signed-in users to support username uniqueness checks.
+     */
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if isSignedIn();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    /**
+     * @description User wishlists are private subcollections owned by the parent user.
+     */
+    match /users/{userId}/wishlists/{wishlistId} {
+      allow get, list, update, delete: if isOwner(userId);
+      allow create: if isOwner(userId);
+    }
+
+    /**
+     * @description Public game catalog. Read-only for most.
+     */
+    match /games/{gameId} {
+      allow get, list: if true;
+      allow write: if false; 
+    }
+
+    /**
+     * @description Developer-published games. 
+     * Read access is public. 
+     * Write access is restricted to the publisher, except for ratings and downloads which can be updated by any signed-in user.
+     */
+    match /publishedGames/{gameId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && request.resource.data.publisherId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        isOwner(resource.data.publisherId) || 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ratings', 'averageRating', 'downloads'])
+      );
+      allow delete: if isOwner(resource.data.publisherId);
+    }
+
+    /**
+     * @description Developer profiles.
+     * Read access is public.
+     * Write access is restricted to the developer, except for followerCount which can be updated by any signed-in user.
+     */
+    match /developers/{developerId} {
+      allow get, list: if true;
+      allow create: if isOwner(developerId);
+      allow update: if isSignedIn() && (
+        isOwner(developerId) || 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followerCount', 'gameCount', 'developerName'])
+      );
+      allow delete: if isOwner(developerId);
+    }
+  }
+}
